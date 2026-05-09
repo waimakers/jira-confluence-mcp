@@ -1,0 +1,24 @@
+{
+  "name": "jira-confluence-mcp",
+  "version": "0.1.0",
+  "description": "Local stdio MCP for Jira + Confluence (Atlassian Cloud) — experimental",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "jira-confluence-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "smoke": "node dist/smoke.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  }
+}
