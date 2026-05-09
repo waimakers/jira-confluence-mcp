@@ -8,7 +8,8 @@ import {
 
 import { AtlassianClient, AtlassianError, loadConfig } from "./atlassian-client.js";
 import { buildConfluenceTools } from "./tools/confluence.js";
-import { buildJiraTools, type ToolDef } from "./tools/jira.js";
+import { buildJiraTools } from "./tools/jira.js";
+import type { ToolDef } from "./tools/types.js";
 
 async function main() {
   const cfg = loadConfig();
