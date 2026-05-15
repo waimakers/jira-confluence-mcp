@@ -39,14 +39,25 @@ export function buildJiraTools(client: AtlassianClient): ToolDef[] {
     },
     {
       name: "jira_list_issue_types",
-      description: "List issue types available for a project (use issueTypeName when creating issues).",
+      description: "List issue types available for a project (use issueTypeName when creating issues). Pass numeric projectId or projectKey.",
       inputSchema: {
         type: "object",
-        properties: { projectKeyOrId: { type: "string" } },
-        required: ["projectKeyOrId"],
+        properties: {
+          projectId: { type: "number", description: "Numeric Jira project id" },
+          projectKey: { type: "string", description: "Jira project key, resolved to numeric id before calling Jira" },
+        },
       },
-      handler: async (a) =>
-        client.get("/rest/api/3/issuetype/project", { projectId: a.projectKeyOrId }),
+      handler: async (a) => {
+        if (a.projectId !== undefined) {
+          return client.get("/rest/api/3/issuetype/project", { projectId: a.projectId });
+        }
+        if (a.projectKey) {
+          const project = (await client.get(`/rest/api/3/project/${enc(a.projectKey)}`)) as { id?: string };
+          if (!project.id) throw new Error(`Could not resolve project id for key: ${a.projectKey}`);
+          return client.get("/rest/api/3/issuetype/project", { projectId: project.id });
+        }
+        throw new Error("jira_list_issue_types requires either projectId or projectKey");
+      },
     },
     {
       name: "jira_list_priorities",
@@ -625,7 +636,7 @@ export function buildJiraTools(client: AtlassianClient): ToolDef[] {
     },
     {
       name: "jira_move_issues_to_sprint",
-      description: "Move one or more issues to a sprint (or to the backlog if sprintId is null).",
+      description: "Move one or more issues to a sprint.",
       inputSchema: {
         type: "object",
         properties: {

@@ -8,7 +8,7 @@ async function main() {
 
   console.log(`→ baseUrl: ${cfg.baseUrl}`);
   console.log(`→ email:   ${cfg.email}`);
-  console.log(`→ token:   ${cfg.apiToken.slice(0, 6)}...${cfg.apiToken.slice(-4)} (${cfg.apiToken.length} chars)`);
+  console.log("→ token:   set");
   console.log("");
 
   // 1. Auth sanity check

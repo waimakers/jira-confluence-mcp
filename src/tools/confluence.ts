@@ -3,6 +3,16 @@ import type { ToolDef } from "./types.js";
 
 const enc = encodeURIComponent;
 
+function assertConfluenceDownloadPath(downloadPath: string) {
+  if (/^https?:\/\//i.test(downloadPath)) {
+    throw new Error("downloadPath must be a relative Confluence path, not an absolute URL");
+  }
+  if (!downloadPath.startsWith("/wiki/")) {
+    throw new Error("downloadPath must start with /wiki/");
+  }
+  return downloadPath;
+}
+
 export function buildConfluenceTools(client: AtlassianClient): ToolDef[] {
   return [
     // ─── spaces ───────────────────────────────────────────────────────
@@ -321,7 +331,8 @@ export function buildConfluenceTools(client: AtlassianClient): ToolDef[] {
         },
         required: ["downloadPath"],
       },
-      handler: async (a) => client.downloadBinary(a.downloadPath, { outputPath: a.outputPath }),
+      handler: async (a) =>
+        client.downloadBinary(assertConfluenceDownloadPath(a.downloadPath), { outputPath: a.outputPath }),
     },
   ];
 }
