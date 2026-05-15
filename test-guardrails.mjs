@@ -26,7 +26,7 @@ const byName = new Map(allTools.map((tool) => [tool.name, tool]));
   const cfg = loadGuardrailsConfig({});
   const { tools } = filterTools(allTools, cfg);
   const names = new Set(tools.map((tool) => tool.name));
-  assert.equal(cfg.readOnly, true);
+  assert.equal(cfg.mode, "readonly");
   assert.equal(names.has("jira_get_issue"), true);
   assert.equal(names.has("confluence_get_page"), true);
   assert.equal(names.has("jira_create_issue"), false);
@@ -35,23 +35,27 @@ const byName = new Map(allTools.map((tool) => [tool.name, tool]));
 }
 
 {
-  const cfg = loadGuardrailsConfig({
-    JCMCP_READ_ONLY: "false",
-    JCMCP_ALLOWED_TOOLS: "jira_create_issue,jira_delete_issue,jira_download_attachment",
-  });
+  const cfg = loadGuardrailsConfig({ JCMCP_MODE: "workshop" });
   const { tools } = filterTools(allTools, cfg);
-  assert.deepEqual(
-    tools.map((tool) => tool.name),
-    ["jira_create_issue"],
-  );
+  const names = new Set(tools.map((tool) => tool.name));
+  assert.equal(names.has("jira_get_issue"), true);
+  assert.equal(names.has("jira_create_issue"), true);
+  assert.equal(names.has("jira_add_comment"), true);
+  assert.equal(names.has("jira_update_issue"), false);
+  assert.equal(names.has("jira_delete_issue"), false);
+  assert.equal(names.has("confluence_update_page"), false);
+}
+
+{
+  const cfg = loadGuardrailsConfig({ JCMCP_MODE: "full" });
+  const { tools } = filterTools(allTools, cfg);
+  assert.equal(tools.length, 56);
 }
 
 {
   const cfg = loadGuardrailsConfig({
-    JCMCP_READ_ONLY: "false",
-    JCMCP_ALLOWED_TOOLS: "jira_create_issue,jira_delete_issue,jira_download_attachment",
-    JCMCP_ENABLE_ATTACHMENTS: "true",
-    JCMCP_ENABLE_DESTRUCTIVE_TOOLS: "true",
+    JCMCP_MODE: "full",
+    JCMCP_TOOLS: "jira_create_issue,jira_delete_issue,jira_download_attachment",
   });
   const { tools } = filterTools(allTools, cfg);
   assert.deepEqual(
@@ -79,54 +83,25 @@ const byName = new Map(allTools.map((tool) => [tool.name, tool]));
 }
 
 {
-  const cfg = loadGuardrailsConfig({
-    JCMCP_READ_ONLY: "false",
-    JCMCP_ALLOWED_JIRA_PROJECTS: "ABC",
-  });
+  const workshopCfg = loadGuardrailsConfig({ JCMCP_MODE: "workshop" });
   assert.doesNotThrow(() =>
-    assertToolCallAllowed(byName.get("jira_create_issue"), { projectKey: "ABC", summary: "x", issueTypeName: "Task" }, cfg),
-  );
-  assert.throws(
-    () => assertToolCallAllowed(byName.get("jira_create_issue"), { projectKey: "XYZ", summary: "x", issueTypeName: "Task" }, cfg),
-    /outside JCMCP_ALLOWED_JIRA_PROJECTS/,
-  );
-  assert.throws(
-    () => assertToolCallAllowed(byName.get("jira_search_issues"), { jql: "ORDER BY updated DESC" }, cfg),
-    /explicit project filter/,
-  );
-  assert.doesNotThrow(() =>
-    assertToolCallAllowed(byName.get("jira_search_issues"), { jql: "project = ABC ORDER BY updated DESC" }, cfg),
+    assertToolCallAllowed(byName.get("jira_create_issue"), { projectKey: "ABC", summary: "x", issueTypeName: "Task" }, workshopCfg),
   );
   assert.throws(
     () =>
       assertToolCallAllowed(
         byName.get("jira_create_issue"),
         { projectKey: "ABC", summary: "x", issueTypeName: "Task", customFields: { customfield_10001: "x" } },
-        cfg,
+        workshopCfg,
       ),
-    /customFields are disabled/,
+    /JCMCP_MODE=full/,
   );
   assert.doesNotThrow(() =>
     assertToolCallAllowed(
       byName.get("jira_create_issue"),
       { projectKey: "ABC", summary: "x", issueTypeName: "Task", customFields: { customfield_10001: "x" } },
-      loadGuardrailsConfig({
-        JCMCP_READ_ONLY: "false",
-        JCMCP_ALLOWED_JIRA_PROJECTS: "ABC",
-        JCMCP_ALLOWED_JIRA_CUSTOM_FIELDS: "customfield_10001",
-      }),
+      loadGuardrailsConfig({ JCMCP_MODE: "full" }),
     ),
-  );
-}
-
-{
-  const cfg = loadGuardrailsConfig({ JCMCP_ALLOWED_CONFLUENCE_SPACES: "ENG" });
-  assert.doesNotThrow(() =>
-    assertToolCallAllowed(byName.get("confluence_search"), { cql: 'space = "ENG" AND type = page' }, cfg),
-  );
-  assert.throws(
-    () => assertToolCallAllowed(byName.get("confluence_search"), { cql: "type = page" }, cfg),
-    /explicit space filter/,
   );
 }
 
@@ -170,12 +145,11 @@ const byName = new Map(allTools.map((tool) => [tool.name, tool]));
   );
   assert.equal(
     loadConfig({
-      ATLASSIAN_BASE_URL: "https://example.test/wiki",
+      ATLASSIAN_BASE_URL: "https://example.atlassian.net/wiki",
       ATLASSIAN_EMAIL: "user@example.com",
       ATLASSIAN_API_TOKEN: "token",
-      JCMCP_ALLOW_NON_ATLASSIAN_BASE_URL: "true",
     }).baseUrl,
-    "https://example.test",
+    "https://example.atlassian.net",
   );
 }
 

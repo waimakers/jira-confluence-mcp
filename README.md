@@ -9,8 +9,8 @@ they are passed in via the MCP client's `env` block.
 
 A focused, transparent reference implementation: ~1,200 lines of TypeScript,
 zero hosting infrastructure, and **56 available tools** across both products.
-For safety, the server now starts in read-only mode by default and requires
-explicit opt-in for write, destructive, and local attachment file operations.
+For safety, the server starts in read-only mode by default. A single mode
+setting can switch it to a workshop-safe write surface or the full tool set.
 
 If you need a production-grade option with per-user OAuth, use Atlassian's
 [official Remote MCP Server](https://github.com/atlassian/atlassian-mcp-server).
@@ -33,9 +33,7 @@ npm run build
 ## Tool inventory (56 available, filtered by guardrails)
 
 By default, only read-only tools are exposed. Write tools require
-`JCMCP_READ_ONLY=false`. Attachment upload/download tools additionally require
-`JCMCP_ENABLE_ATTACHMENTS=true`, and destructive tools require
-`JCMCP_ENABLE_DESTRUCTIVE_TOOLS=true`.
+`JCMCP_MODE=workshop` or `JCMCP_MODE=full`.
 
 ### Jira — meta / discovery (6)
 `jira_myself`, `jira_list_projects`, `jira_list_issue_types`, `jira_list_priorities`, `jira_list_statuses`, `jira_search_users`
@@ -99,36 +97,29 @@ MCP client config — never commit them to a `.env` file.
 | `ATLASSIAN_EMAIL` | your Atlassian login email |
 | `ATLASSIAN_API_TOKEN` | token from id.atlassian.com (starts with `ATATT3...`) |
 
-`ATLASSIAN_BASE_URL` must be an `https://*.atlassian.net` URL by default. For
-local tests against a mock endpoint, set `JCMCP_ALLOW_NON_ATLASSIAN_BASE_URL=true`.
+`ATLASSIAN_BASE_URL` must be an `https://*.atlassian.net` URL.
 
 ## Safety guardrails
 
 | Variable | Default | Effect |
 |---|---:|---|
-| `JCMCP_READ_ONLY` | `true` | Exposes only read-only tools unless set to `false`. |
-| `JCMCP_ALLOWED_TOOLS` | unset | Comma-separated exact tool allowlist. Applies in addition to the other guardrails. |
-| `JCMCP_ENABLE_ATTACHMENTS` | `false` | Enables attachment upload/download tools. Listing attachments is still read-only. |
-| `JCMCP_ENABLE_DESTRUCTIVE_TOOLS` | `false` | Enables delete/remove tools. |
-| `JCMCP_ALLOWED_JIRA_PROJECTS` | unset | Comma-separated Jira project keys. Blocks scoped Jira calls outside those projects when the project can be verified. |
-| `JCMCP_ALLOWED_CONFLUENCE_SPACES` | unset | Comma-separated Confluence space ids/keys. Blocks scoped Confluence calls outside those spaces when the space can be verified. |
-| `JCMCP_ALLOW_JIRA_CUSTOM_FIELDS` | `false` | Allows arbitrary `customFields` on Jira create/update tools. |
-| `JCMCP_ALLOWED_JIRA_CUSTOM_FIELDS` | unset | Comma-separated allowlist of Jira custom field ids, for example `customfield_10001`. |
+| `JCMCP_MODE` | `readonly` | `readonly` exposes read tools only; `workshop` adds `jira_create_issue` and `jira_add_comment`; `full` exposes all tools. |
+| `JCMCP_TOOLS` | unset | Optional comma-separated exact tool allowlist. Applies inside the selected mode. |
 | `JCMCP_FILE_ROOT` | unset | Required for local attachment upload/download paths. Relative paths resolve inside this directory. |
-| `JCMCP_MAX_FILE_BYTES` | `10485760` | Maximum attachment upload/download size in bytes. |
-| `JCMCP_ALLOW_FILE_OVERWRITE` | `false` | Allows attachment downloads to overwrite existing files under `JCMCP_FILE_ROOT`. |
 
-Example workshop-safe write allowlist:
+Other safety behavior is fixed, not configurable: attachment files are capped at
+10 MB, downloads never overwrite existing files, Confluence downloads only
+accept relative `/wiki/...` paths, and Jira `customFields` are rejected unless
+`JCMCP_MODE=full`.
+
+Example workshop-safe setup:
 
 ```toml
 [mcp_servers.jira-confluence.env]
 ATLASSIAN_BASE_URL = "https://your-org.atlassian.net"
 ATLASSIAN_EMAIL    = "workshop-bot@example.com"
 ATLASSIAN_API_TOKEN = "ATATT3..."
-JCMCP_READ_ONLY = "false"
-JCMCP_ALLOWED_TOOLS = "jira_myself,jira_search_issues,jira_search_issues_count,jira_get_issue,jira_list_comments,jira_create_issue,jira_add_comment,confluence_search,confluence_get_page,confluence_get_page_children"
-JCMCP_ALLOWED_JIRA_PROJECTS = "WORKSHOP"
-JCMCP_ALLOWED_CONFLUENCE_SPACES = "ENG"
+JCMCP_MODE = "workshop"
 ```
 
 ## Register with Claude Code
@@ -199,10 +190,9 @@ Test helpers in the repo:
   `descriptionText` / `commentText` arguments take plain text and are converted
   to ADF for you.
 - **Confluence body format**: pages use Confluence "storage" format (HTML-like).
-- **File uploads/downloads** are hidden by default. When enabled, local paths
-  must stay under `JCMCP_FILE_ROOT`, downloads do not overwrite existing files
-  unless `JCMCP_ALLOW_FILE_OVERWRITE=true`, and files are capped by
-  `JCMCP_MAX_FILE_BYTES`.
+- **File uploads/downloads** are only exposed in `JCMCP_MODE=full`. Local paths
+  must stay under `JCMCP_FILE_ROOT`, downloads do not overwrite existing files,
+  and files are capped at 10 MB.
 - **Confluence attachment downloads** only accept relative `/wiki/...` paths.
   Absolute URLs are rejected so the Atlassian auth header is not sent to
   attacker-controlled hosts.

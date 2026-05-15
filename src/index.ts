@@ -22,8 +22,6 @@ async function main() {
   const guardrails = loadGuardrailsConfig();
   const client = new AtlassianClient(cfg, {
     fileRoot: guardrails.fileRoot,
-    maxFileBytes: guardrails.maxFileBytes,
-    allowOverwrite: guardrails.allowOverwrite,
   });
 
   const allTools: ToolDef[] = [...buildJiraTools(client), ...buildConfluenceTools(client)];
@@ -77,8 +75,7 @@ async function main() {
   // Logs go to stderr so they don't pollute stdio JSON-RPC.
   console.error(
     `jira-confluence-mcp ready. ${tools.length} tools loaded (${hidden.length} hidden). ` +
-      `baseUrl=${cfg.baseUrl} readOnly=${guardrails.readOnly} ` +
-      `attachments=${guardrails.enableAttachments} destructive=${guardrails.enableDestructiveTools}`,
+      `baseUrl=${cfg.baseUrl} mode=${guardrails.mode}`,
   );
 }
 

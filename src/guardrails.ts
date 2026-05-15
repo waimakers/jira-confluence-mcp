@@ -1,5 +1,7 @@
 import type { ToolDef } from "./tools/types.js";
 
+type GuardrailsMode = "readonly" | "workshop" | "full";
+
 const READ_ONLY_TOOL_NAMES = new Set([
   "jira_myself",
   "jira_list_projects",
@@ -35,36 +37,16 @@ const READ_ONLY_TOOL_NAMES = new Set([
   "confluence_list_page_attachments",
 ]);
 
-const ATTACHMENT_FILE_TOOL_NAMES = new Set([
-  "jira_upload_attachment",
-  "jira_download_attachment",
-  "confluence_upload_attachment",
-  "confluence_download_attachment",
+const WORKSHOP_TOOL_NAMES = new Set([
+  ...READ_ONLY_TOOL_NAMES,
+  "jira_create_issue",
+  "jira_add_comment",
 ]);
-
-const DESTRUCTIVE_TOOL_NAMES = new Set([
-  "jira_delete_issue",
-  "jira_delete_comment",
-  "jira_delete_attachment",
-  "jira_delete_issue_link",
-  "jira_remove_watcher",
-  "confluence_delete_page",
-]);
-
-const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export type GuardrailsConfig = {
-  readOnly: boolean;
+  mode: GuardrailsMode;
   allowedTools?: Set<string>;
-  enableAttachments: boolean;
-  enableDestructiveTools: boolean;
-  allowedJiraProjects?: Set<string>;
-  allowedConfluenceSpaces?: Set<string>;
-  allowCustomFields: boolean;
-  allowedJiraCustomFields?: Set<string>;
   fileRoot?: string;
-  maxFileBytes: number;
-  allowOverwrite: boolean;
 };
 
 export type FilteredTools = {
@@ -72,60 +54,39 @@ export type FilteredTools = {
   hidden: Array<{ name: string; reason: string }>;
 };
 
-function parseBool(value: string | undefined, defaultValue: boolean): boolean {
-  if (value === undefined || value.trim() === "") return defaultValue;
+function parseMode(value: string | undefined): GuardrailsMode {
+  if (value === undefined || value.trim() === "") return "readonly";
   const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  throw new Error(`Invalid boolean env value: ${value}`);
+  if (normalized === "readonly" || normalized === "workshop" || normalized === "full") return normalized;
+  throw new Error(`Invalid JCMCP_MODE: ${value}. Expected readonly, workshop, or full.`);
 }
 
-function parseCsvSet(value: string | undefined, transform = (v: string) => v): Set<string> | undefined {
+function parseCsvSet(value: string | undefined): Set<string> | undefined {
   if (!value) return undefined;
   const items = value
     .split(",")
-    .map((item) => transform(item.trim()))
+    .map((item) => item.trim())
     .filter(Boolean);
   return items.length ? new Set(items) : undefined;
 }
 
-function parsePositiveInt(value: string | undefined, defaultValue: number): number {
-  if (value === undefined || value.trim() === "") return defaultValue;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Expected a positive integer env value, got: ${value}`);
-  }
-  return parsed;
-}
-
 export function loadGuardrailsConfig(env: NodeJS.ProcessEnv = process.env): GuardrailsConfig {
   return {
-    readOnly: parseBool(env.JCMCP_READ_ONLY, true),
-    allowedTools: parseCsvSet(env.JCMCP_ALLOWED_TOOLS),
-    enableAttachments: parseBool(env.JCMCP_ENABLE_ATTACHMENTS, false),
-    enableDestructiveTools: parseBool(env.JCMCP_ENABLE_DESTRUCTIVE_TOOLS, false),
-    allowedJiraProjects: parseCsvSet(env.JCMCP_ALLOWED_JIRA_PROJECTS, (v) => v.toUpperCase()),
-    allowedConfluenceSpaces: parseCsvSet(env.JCMCP_ALLOWED_CONFLUENCE_SPACES),
-    allowCustomFields: parseBool(env.JCMCP_ALLOW_JIRA_CUSTOM_FIELDS, false),
-    allowedJiraCustomFields: parseCsvSet(env.JCMCP_ALLOWED_JIRA_CUSTOM_FIELDS),
+    mode: parseMode(env.JCMCP_MODE),
+    allowedTools: parseCsvSet(env.JCMCP_TOOLS),
     fileRoot: env.JCMCP_FILE_ROOT,
-    maxFileBytes: parsePositiveInt(env.JCMCP_MAX_FILE_BYTES, DEFAULT_MAX_FILE_BYTES),
-    allowOverwrite: parseBool(env.JCMCP_ALLOW_FILE_OVERWRITE, false),
   };
 }
 
 function hiddenReason(tool: ToolDef, cfg: GuardrailsConfig): string | undefined {
   if (cfg.allowedTools && !cfg.allowedTools.has(tool.name)) {
-    return "not in JCMCP_ALLOWED_TOOLS";
+    return "not in JCMCP_TOOLS";
   }
-  if (cfg.readOnly && !READ_ONLY_TOOL_NAMES.has(tool.name)) {
-    return "hidden by read-only mode";
+  if (cfg.mode === "readonly" && !READ_ONLY_TOOL_NAMES.has(tool.name)) {
+    return "hidden by readonly mode";
   }
-  if (!cfg.enableAttachments && ATTACHMENT_FILE_TOOL_NAMES.has(tool.name)) {
-    return "attachment file tools disabled";
-  }
-  if (!cfg.enableDestructiveTools && DESTRUCTIVE_TOOL_NAMES.has(tool.name)) {
-    return "destructive tools disabled";
+  if (cfg.mode === "workshop" && !WORKSHOP_TOOL_NAMES.has(tool.name)) {
+    return "hidden by workshop mode";
   }
   return undefined;
 }
@@ -225,121 +186,11 @@ export function validateToolArguments(tool: ToolDef, rawArgs: unknown): Record<s
   return input;
 }
 
-function issueProjectKey(value: string): string | undefined {
-  const match = /^([A-Z][A-Z0-9_]+)-\d+$/i.exec(value.trim());
-  return match?.[1]?.toUpperCase();
-}
-
-function assertJiraProjectAllowed(projectKey: string | undefined, cfg: GuardrailsConfig, context: string): void {
-  if (!cfg.allowedJiraProjects || cfg.allowedJiraProjects.size === 0) return;
-  if (!projectKey) {
-    throw new Error(`${context} cannot be verified against JCMCP_ALLOWED_JIRA_PROJECTS`);
-  }
-  if (!cfg.allowedJiraProjects.has(projectKey.toUpperCase())) {
-    throw new Error(`${context} is outside JCMCP_ALLOWED_JIRA_PROJECTS`);
-  }
-}
-
-function projectsFromJql(jql: string): string[] {
-  const projects = new Set<string>();
-  for (const match of jql.matchAll(/\bproject\s*=\s*"?([A-Z][A-Z0-9_]*)"?/gi)) {
-    projects.add(match[1].toUpperCase());
-  }
-  for (const match of jql.matchAll(/\bproject\s+in\s*\(([^)]*)\)/gi)) {
-    for (const raw of match[1].split(",")) {
-      const project = raw.trim().replace(/^["']|["']$/g, "");
-      if (/^[A-Z][A-Z0-9_]*$/i.test(project)) projects.add(project.toUpperCase());
-    }
-  }
-  return [...projects];
-}
-
-function assertJqlAllowed(jql: string, cfg: GuardrailsConfig): void {
-  if (!cfg.allowedJiraProjects || cfg.allowedJiraProjects.size === 0) return;
-  const projects = projectsFromJql(jql);
-  if (projects.length === 0) {
-    throw new Error("JQL must include an explicit project filter when JCMCP_ALLOWED_JIRA_PROJECTS is set");
-  }
-  for (const project of projects) {
-    assertJiraProjectAllowed(project, cfg, `JQL project ${project}`);
-  }
-}
-
-function assertCustomFieldsAllowed(customFields: Record<string, unknown>, cfg: GuardrailsConfig): void {
-  const keys = Object.keys(customFields);
-  if (keys.length === 0) return;
-
-  if (cfg.allowedJiraCustomFields) {
-    for (const key of keys) {
-      if (!cfg.allowedJiraCustomFields.has(key)) {
-        throw new Error(`customFields.${key} is outside JCMCP_ALLOWED_JIRA_CUSTOM_FIELDS`);
-      }
-    }
-    return;
-  }
-
-  if (!cfg.allowCustomFields) {
-    throw new Error("customFields are disabled. Set JCMCP_ALLOW_JIRA_CUSTOM_FIELDS=true or JCMCP_ALLOWED_JIRA_CUSTOM_FIELDS.");
-  }
-}
-
-function assertConfluenceSpaceAllowed(space: string | undefined, cfg: GuardrailsConfig, context: string): void {
-  if (!cfg.allowedConfluenceSpaces || cfg.allowedConfluenceSpaces.size === 0) return;
-  if (!space) {
-    throw new Error(`${context} cannot be verified against JCMCP_ALLOWED_CONFLUENCE_SPACES`);
-  }
-  if (!cfg.allowedConfluenceSpaces.has(space)) {
-    throw new Error(`${context} is outside JCMCP_ALLOWED_CONFLUENCE_SPACES`);
-  }
-}
-
-function spacesFromCql(cql: string): string[] {
-  const spaces = new Set<string>();
-  for (const match of cql.matchAll(/\bspace\s*=\s*"?([A-Z0-9_-]+)"?/gi)) {
-    spaces.add(match[1]);
-  }
-  for (const match of cql.matchAll(/\bspace\s+in\s*\(([^)]*)\)/gi)) {
-    for (const raw of match[1].split(",")) {
-      const space = raw.trim().replace(/^["']|["']$/g, "");
-      if (/^[A-Z0-9_-]+$/i.test(space)) spaces.add(space);
-    }
-  }
-  return [...spaces];
-}
-
 export function assertToolCallAllowed(tool: ToolDef, args: Record<string, any>, cfg: GuardrailsConfig): void {
   const reason = hiddenReason(tool, cfg);
   if (reason) throw new Error(`Tool ${tool.name} is not available: ${reason}`);
 
-  if (tool.name.startsWith("jira_")) {
-    if (args.projectKey) assertJiraProjectAllowed(args.projectKey, cfg, `projectKey ${args.projectKey}`);
-    if (args.projectId !== undefined && !args.projectKey) {
-      assertJiraProjectAllowed(undefined, cfg, `projectId ${args.projectId}`);
-    }
-    if (args.projectKeyOrId) {
-      const value = String(args.projectKeyOrId);
-      assertJiraProjectAllowed(/^\d+$/.test(value) ? undefined : value, cfg, `projectKeyOrId ${value}`);
-    }
-    for (const key of ["issueKey", "parentKey", "inwardKey", "outwardKey"]) {
-      if (args[key]) assertJiraProjectAllowed(issueProjectKey(String(args[key])), cfg, `${key} ${args[key]}`);
-    }
-    if (args.issueKeys) {
-      for (const issueKey of args.issueKeys) {
-        assertJiraProjectAllowed(issueProjectKey(String(issueKey)), cfg, `issueKey ${issueKey}`);
-      }
-    }
-    if (args.jql) assertJqlAllowed(args.jql, cfg);
-    if (args.customFields) assertCustomFieldsAllowed(args.customFields, cfg);
-  }
-
-  if (tool.name.startsWith("confluence_")) {
-    if (args.spaceId) assertConfluenceSpaceAllowed(String(args.spaceId), cfg, `spaceId ${args.spaceId}`);
-    if (args.cql) {
-      const spaces = spacesFromCql(args.cql);
-      if (cfg.allowedConfluenceSpaces && spaces.length === 0) {
-        throw new Error("CQL must include an explicit space filter when JCMCP_ALLOWED_CONFLUENCE_SPACES is set");
-      }
-      for (const space of spaces) assertConfluenceSpaceAllowed(space, cfg, `CQL space ${space}`);
-    }
+  if (args.customFields && cfg.mode !== "full") {
+    throw new Error("customFields are only available in JCMCP_MODE=full");
   }
 }

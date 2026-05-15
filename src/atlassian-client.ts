@@ -10,9 +10,9 @@ export type AtlassianConfig = {
 
 export type FileAccessConfig = {
   fileRoot?: string;
-  maxFileBytes?: number;
-  allowOverwrite?: boolean;
 };
+
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 export class AtlassianError extends Error {
   constructor(
@@ -30,8 +30,6 @@ export class AtlassianClient {
   private baseOrigin: string;
   private authHeader: string;
   private fileRoot?: string;
-  private maxFileBytes: number;
-  private allowOverwrite: boolean;
 
   constructor(cfg: AtlassianConfig, fileAccess: FileAccessConfig = {}) {
     this.baseUrl = cfg.baseUrl.replace(/\/+$/, "");
@@ -39,8 +37,6 @@ export class AtlassianClient {
     const basic = Buffer.from(`${cfg.email}:${cfg.apiToken}`, "utf8").toString("base64");
     this.authHeader = `Basic ${basic}`;
     this.fileRoot = fileAccess.fileRoot ? resolve(fileAccess.fileRoot) : undefined;
-    this.maxFileBytes = fileAccess.maxFileBytes ?? 10 * 1024 * 1024;
-    this.allowOverwrite = fileAccess.allowOverwrite ?? false;
   }
 
   private buildUrl(path: string, query?: Record<string, string | number | boolean | undefined>) {
@@ -70,8 +66,8 @@ export class AtlassianClient {
   }
 
   private assertFileSize(bytes: number): void {
-    if (bytes > this.maxFileBytes) {
-      throw new Error(`File is too large (${bytes} bytes). Limit is ${this.maxFileBytes} bytes.`);
+    if (bytes > MAX_ATTACHMENT_BYTES) {
+      throw new Error(`File is too large (${bytes} bytes). Limit is ${MAX_ATTACHMENT_BYTES} bytes.`);
     }
   }
 
@@ -190,15 +186,13 @@ export class AtlassianClient {
 
     if (opts.outputPath) {
       const outputPath = this.resolveSafeFilePath(opts.outputPath);
-      if (!this.allowOverwrite) {
-        try {
-          await access(outputPath, constants.F_OK);
-          throw new Error(`Refusing to overwrite existing file: ${outputPath}`);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-        }
+      try {
+        await access(outputPath, constants.F_OK);
+        throw new Error(`Refusing to overwrite existing file: ${outputPath}`);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       }
-      await writeFile(outputPath, buf, { flag: this.allowOverwrite ? "w" : "wx" });
+      await writeFile(outputPath, buf, { flag: "wx" });
       return { status: res.status, bytes: buf.byteLength, contentType, outputPath };
     }
     return { status: res.status, bytes: buf.byteLength, contentType, base64: buf.toString("base64") };
@@ -219,11 +213,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtlassianConfi
   if (parsedBaseUrl.protocol !== "https:") {
     throw new Error("ATLASSIAN_BASE_URL must use https");
   }
-  if (
-    !parsedBaseUrl.hostname.endsWith(".atlassian.net") &&
-    env.JCMCP_ALLOW_NON_ATLASSIAN_BASE_URL !== "true"
-  ) {
-    throw new Error("ATLASSIAN_BASE_URL must be an atlassian.net host unless JCMCP_ALLOW_NON_ATLASSIAN_BASE_URL=true");
+  if (!parsedBaseUrl.hostname.endsWith(".atlassian.net")) {
+    throw new Error("ATLASSIAN_BASE_URL must be an atlassian.net host");
   }
 
   return { baseUrl: parsedBaseUrl.origin, email, apiToken };
