@@ -7,15 +7,25 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { AtlassianClient, AtlassianError, loadConfig } from "./atlassian-client.js";
+import {
+  assertToolCallAllowed,
+  filterTools,
+  loadGuardrailsConfig,
+  validateToolArguments,
+} from "./guardrails.js";
 import { buildConfluenceTools } from "./tools/confluence.js";
 import { buildJiraTools } from "./tools/jira.js";
 import type { ToolDef } from "./tools/types.js";
 
 async function main() {
   const cfg = loadConfig();
-  const client = new AtlassianClient(cfg);
+  const guardrails = loadGuardrailsConfig();
+  const client = new AtlassianClient(cfg, {
+    fileRoot: guardrails.fileRoot,
+  });
 
-  const tools: ToolDef[] = [...buildJiraTools(client), ...buildConfluenceTools(client)];
+  const allTools: ToolDef[] = [...buildJiraTools(client), ...buildConfluenceTools(client)];
+  const { tools, hidden } = filterTools(allTools, guardrails);
   const toolMap = new Map(tools.map((t) => [t.name, t]));
 
   const server = new Server(
@@ -40,7 +50,9 @@ async function main() {
       };
     }
     try {
-      const result = await tool.handler(req.params.arguments ?? {});
+      const args = validateToolArguments(tool, req.params.arguments ?? {});
+      assertToolCallAllowed(tool, args, guardrails);
+      const result = await tool.handler(args);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
@@ -61,7 +73,10 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Logs go to stderr so they don't pollute stdio JSON-RPC.
-  console.error(`jira-confluence-mcp ready. ${tools.length} tools loaded. baseUrl=${cfg.baseUrl}`);
+  console.error(
+    `jira-confluence-mcp ready. ${tools.length} tools loaded (${hidden.length} hidden). ` +
+      `baseUrl=${cfg.baseUrl} mode=${guardrails.mode}`,
+  );
 }
 
 main().catch((err) => {

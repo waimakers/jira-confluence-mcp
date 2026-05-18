@@ -8,9 +8,9 @@ they are passed in via the MCP client's `env` block.
 ## Why this exists
 
 A focused, transparent reference implementation: ~1,200 lines of TypeScript,
-zero hosting infrastructure, **56 tools** covering full read/write across both
-products including files, links, comments, sprints, worklogs, attachments,
-labels, page hierarchy, and version history.
+zero hosting infrastructure, and **56 available tools** across both products.
+For safety, the server starts in read-only mode by default. A single mode
+setting can switch it to a workshop-safe write surface or the full tool set.
 
 If you need a production-grade option with per-user OAuth, use Atlassian's
 [official Remote MCP Server](https://github.com/atlassian/atlassian-mcp-server).
@@ -30,7 +30,10 @@ npm run build
 1. Visit https://id.atlassian.com/manage-profile/security/api-tokens
 2. Create token, copy it. The same token works for both Jira and Confluence.
 
-## Tool inventory (56)
+## Tool inventory (56 available, filtered by guardrails)
+
+By default, only read-only tools are exposed. Write tools require
+`JCMCP_MODE=workshop` or `JCMCP_MODE=full`.
 
 ### Jira — meta / discovery (6)
 `jira_myself`, `jira_list_projects`, `jira_list_issue_types`, `jira_list_priorities`, `jira_list_statuses`, `jira_search_users`
@@ -94,6 +97,31 @@ MCP client config — never commit them to a `.env` file.
 | `ATLASSIAN_EMAIL` | your Atlassian login email |
 | `ATLASSIAN_API_TOKEN` | token from id.atlassian.com (starts with `ATATT3...`) |
 
+`ATLASSIAN_BASE_URL` must be an `https://*.atlassian.net` URL.
+
+## Safety guardrails
+
+| Variable | Default | Effect |
+|---|---:|---|
+| `JCMCP_MODE` | `readonly` | `readonly` exposes read tools only; `workshop` adds `jira_create_issue` and `jira_add_comment`; `full` exposes all tools. |
+| `JCMCP_TOOLS` | unset | Optional comma-separated exact tool allowlist. Applies inside the selected mode. |
+| `JCMCP_FILE_ROOT` | unset | Required for local attachment upload/download paths. Relative paths resolve inside this directory. |
+
+Other safety behavior is fixed, not configurable: attachment files are capped at
+10 MB, downloads never overwrite existing files, Confluence downloads only
+accept relative `/wiki/...` paths, and Jira `customFields` are rejected unless
+`JCMCP_MODE=full`.
+
+Example workshop-safe setup:
+
+```toml
+[mcp_servers.jira-confluence.env]
+ATLASSIAN_BASE_URL = "https://your-org.atlassian.net"
+ATLASSIAN_EMAIL    = "workshop-bot@example.com"
+ATLASSIAN_API_TOKEN = "ATATT3..."
+JCMCP_MODE = "workshop"
+```
+
 ## Register with Claude Code
 
 ```json
@@ -145,6 +173,7 @@ ATLASSIAN_API_TOKEN=ATATT3... \
 ```
 
 Test helpers in the repo:
+- `npm test` — local guardrail tests; no Atlassian credentials required.
 - `dist/smoke.js` — direct API check (auth + projects + spaces).
 - `test-stdio.mjs` — JSON-RPC `tools/list` + one `tools/call`.
 - `test-expanded.mjs` — exercises 6 representative tools end-to-end.
@@ -161,9 +190,12 @@ Test helpers in the repo:
   `descriptionText` / `commentText` arguments take plain text and are converted
   to ADF for you.
 - **Confluence body format**: pages use Confluence "storage" format (HTML-like).
-- **File uploads** read from a local file path on the machine running the MCP
-  process; **downloads** write to a local file path (or return base64 for small
-  files).
+- **File uploads/downloads** are only exposed in `JCMCP_MODE=full`. Local paths
+  must stay under `JCMCP_FILE_ROOT`, downloads do not overwrite existing files,
+  and files are capped at 10 MB.
+- **Confluence attachment downloads** only accept relative `/wiki/...` paths.
+  Absolute URLs are rejected so the Atlassian auth header is not sent to
+  attacker-controlled hosts.
 - **Permission model**: all API actions are attributed to the Atlassian user
   whose token is configured. For multi-user attribution, use Atlassian's
   official Remote MCP Server (OAuth 2.1 / 3LO).
